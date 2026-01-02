@@ -17,7 +17,8 @@
 #include <assert.h>
 #include <string.h>
 
-#define NVAR (10)
+// model.c 顶部
+#define NVAR (12) // 从 10 修改为 12，预留足够空间
 #define USE_FIXED_TPTE (0)
 #define USE_MIXED_TPTE (1)
 #define NSUP (3)
@@ -1918,11 +1919,28 @@ void load_iharm_data(int n, char *fnam, int dumpidx, int verbose)
   fstart[3] = 7;
   hdf5_read_array(data[n]->p[B3][0][0], "prims", 4, fdims, fstart, fcount, mdims, mstart, H5T_IEEE_F64LE); 
 
-  if (ELECTRONS == 1) {
-    fstart[3] = 8;
-    hdf5_read_array(data[n]->p[KEL][0][0], "prims", 4, fdims, fstart, fcount, mdims, mstart, H5T_IEEE_F64LE);
-    fstart[3] = 9;
-    hdf5_read_array(data[n]->p[KTOT][0][0], "prims", 4, fdims, fstart, fcount, mdims, mstart, H5T_IEEE_F64LE);
+/* --- B. 定义 3D 数据读取所需的参数 (用于读取您新增的独立数据集) --- */
+  // 注意这里只有 3 个元素，对应 N1, N2, N3
+  hsize_t fdims3d[] = { N1, N2, N3 };
+  hsize_t fstart3d[] = { 0, 0, 0 };
+  hsize_t fcount3d[] = { N1, N2, N3 };
+  hsize_t mdims3d[] = { N1+2, N2+2, N3+2 };
+  hsize_t mstart3d[] = { 1, 1, 1 };
+
+// 1. 读取激波掩码 (KEL)
+  // 如果你在 Python 中存的是独立的 "KEL" 数据集
+  if (hdf5_exists("KEL")) {
+    hdf5_read_array(data[n]->p[KEL][0][0], "KEL", 3, fdims3d, fstart3d, fcount3d, mdims3d, mstart3d, H5T_IEEE_F64LE);
+  }
+
+  // 2. 读取非热电子归一化 (UNTH)
+  if (hdf5_exists("UNTH")) {
+    hdf5_read_array(data[n]->p[UNTH][0][0], "UNTH", 3, fdims3d, fstart3d, fcount3d, mdims3d, mstart3d, H5T_IEEE_F64LE);
+  }
+
+  // 3. 读取非热电子谱指数 (p)
+  if (hdf5_exists("p")) {
+    hdf5_read_array(data[n]->p[P_IDX][0][0], "p", 3, fdims3d, fstart3d, fcount3d, mdims3d, mstart3d, H5T_IEEE_F64LE);
   }
 
   //Reversing B Field
@@ -2102,3 +2120,28 @@ void get_model_jar(double X[NDIM], double Kcon[NDIM],
     double *aI, double *aQ, double *aU, double *aV,
     double *rQ, double *rU, double *rV) {return;}
 void get_model_jk(double X[NDIM], double Kcon[NDIM], double *jnuinv, double *knuinv) {return;}
+
+// 获取非热电子归一化 C
+double get_model_unth(double X[NDIM]) {
+  if (X_in_domain(X) == 0) return 0.;
+  int nA, nB;
+  double tfac = set_tinterp_ns(X, &nA, &nB);
+  return interp_scalar_time(X, data[nA]->p[UNTH], data[nB]->p[UNTH], tfac);
+}
+
+// 获取激波开关
+int get_model_kel(double X[NDIM]) {
+  if (X_in_domain(X) == 0) return 0;
+  int nA, nB;
+  double tfac = set_tinterp_ns(X, &nA, &nB);
+  double val = interp_scalar_time(X, data[nA]->p[KEL], data[nB]->p[KEL], tfac);
+  return (val > 0.5) ? 1 : 0;
+}
+
+// 获取谱指数 p
+double get_model_p(double X[NDIM]) {
+  if (X_in_domain(X) == 0) return 3.0; // 默认值
+  int nA, nB;
+  double tfac = set_tinterp_ns(X, &nA, &nB);
+  return interp_scalar_time(X, data[nA]->p[P_IDX], data[nB]->p[P_IDX], tfac);
+}

@@ -25,6 +25,16 @@ double get_model_sigma(double X[NDIM]);
 double get_model_beta(double X[NDIM]);
 double get_model_ne(double X[NDIM]);
 
+/* --- [新增] 为激波加速物理模型提供的接口 --- */
+// 获取非热电子归一化常数 C (对应 HDF5 中的 UNTH)
+double get_model_unth(double X[NDIM]); 
+
+// 获取非热电子谱指数 p (对应 HDF5 中的 p)
+double get_model_p(double X[NDIM]);
+
+// 获取激波掩码开关 (对应 HDF5 中的 KEL)
+int get_model_kel(double X[NDIM]);
+
 // For exotic or custom distributions
 void get_model_jar(double X[NDIM], double Kcon[NDIM],
     double *jI, double *jQ, double *jU, double *jV,

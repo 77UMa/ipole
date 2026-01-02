@@ -158,6 +158,11 @@ void jar_calc_dist(int dist, int pol, double X[NDIM], double Kcon[NDIM],
     *rQ = 0; *rU = 0; *rV = 0;
     return;
   }
+// --- [新增开始] B. 获取您的激波加速物理量 ---
+  double my_C = get_model_unth(X);  // 从 HDF5 读取的归一化常数 C
+  double my_p = get_model_p(X);     // 从 HDF5 读取的谱指数 p
+  int is_shock = get_model_kel(X);  // 从 HDF5 读取的激波开关 (1 或 0)
+  // --- [新增结束] ---
 
   // Call through to the model if it's responsible for this job
   if (dist == E_CUSTOM) {
@@ -178,7 +183,29 @@ void jar_calc_dist(int dist, int pol, double X[NDIM], double Kcon[NDIM],
   paramsM.observer_angle   = theta;
   paramsM.magnetic_field   = get_model_b(X);
 
-  // ...and then the specific distribution and its parameters.
+// --- C. 核心逻辑手术：注入激波加速模型 ---
+  // 如果 KEL 网格标记为 1，我们强行切换为幂律分布
+  if (is_shock == 1) {
+    static int hit_count = 0;
+    if (hit_count++ % 1000 == 0) printf("DEBUG: Ray hit shock! C=%g, p=%g\n", my_C, my_p);
+    paramsM.distribution = paramsM.POWER_LAW; // 强制使用幂律拟合
+    paramsM.power_law_p = my_p;               // 使用真实的 p
+    
+    // 【替换杨等模型的核心点】：不再使用 powerlaw_eta * B^2
+    // 直接将电子密度设置为您计算的 C 归一化常数
+    paramsM.electron_density = (my_C > 0) ? my_C : 1e-20; 
+    
+    // 设置加速截止的能量上限
+    paramsM.gamma_min = powerlaw_gamma_min;
+    paramsM.gamma_max = powerlaw_gamma_max;
+    paramsM.gamma_cutoff = powerlaw_gamma_cut;
+  } 
+  else {
+    // 非激波区域：保留原有逻辑 (默认为热分布)
+    paramsM.distribution = paramsM.MAXWELL_JUETTNER; //
+    paramsM.electron_density = Ne;
+    paramsM.theta_e = get_model_thetae(X);
+     // ...and then the specific distribution and its parameters.
   switch (dist) {
   case E_KAPPA: // Kappa fits (Pandya + Marszewski)
     paramsM.distribution = paramsM.KAPPA_DIST;
@@ -206,6 +233,9 @@ void jar_calc_dist(int dist, int pol, double X[NDIM], double Kcon[NDIM],
     paramsM.theta_e = get_model_thetae(X);
     break;
   }
+  }
+
+ 
 
   // First, enforce no emission/absorption along field lines,
   // but allow Faraday rotation in polarized context
@@ -285,7 +315,7 @@ void jar_calc_dist(int dist, int pol, double X[NDIM], double Kcon[NDIM],
       *aQ = -alpha_nu_fit(&paramsM, paramsM.STOKES_Q) * nu;
       *aU = -alpha_nu_fit(&paramsM, paramsM.STOKES_U) * nu;
       *aV = alpha_nu_fit(&paramsM, paramsM.STOKES_V) * nu;
-
+    
       // Check basic relationships
       double aP = sqrt(*aQ * *aQ + *aU * *aU + *aV * *aV);
       if (*aI < aP/max_pol_frac_a) {
@@ -296,12 +326,18 @@ void jar_calc_dist(int dist, int pol, double X[NDIM], double Kcon[NDIM],
         *aV *= pol_frac_a;
       }
     }
+  if (paramsM.distribution == paramsM.POWER_LAW) {
+            *rQ = 0.0;
+            *rU = 0.0;
+            *rV = 0.0;
+    } else {
+            // 只有非幂律分布（热分布等）才调用这个会崩溃的函数
+            paramsM.dexter_fit = 0;
+            *rQ = rho_nu_fit(&paramsM, paramsM.STOKES_Q) * nu;
+            *rU = rho_nu_fit(&paramsM, paramsM.STOKES_U) * nu;
+            *rV = rho_nu_fit(&paramsM, paramsM.STOKES_V) * nu;
+    }
 
-    // ROTATIVITIES
-    paramsM.dexter_fit = 0;  // Don't use the Dexter rhoV, as it's unstable at low temperature
-    *rQ = rho_nu_fit(&paramsM, paramsM.STOKES_Q) * nu;
-    *rU = rho_nu_fit(&paramsM, paramsM.STOKES_U) * nu;
-    *rV = rho_nu_fit(&paramsM, paramsM.STOKES_V) * nu;
   }
 
 #if DEBUG
