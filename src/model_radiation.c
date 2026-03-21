@@ -190,7 +190,7 @@ void jar_calc_dist(int dist, int pol, double X[NDIM], double Kcon[NDIM],
   // 如果 KEL 网格标记为 1，我们强行切换为幂律分布
   if (is_shock == 1) {
     static int hit_count = 0;
-    if (hit_count++ % 1000 == 0) printf("DEBUG: Ray hit shock! C=%g, p=%g\n", my_C, my_p);
+    if (hit_count++ % 1000 == 0) printf("DEBUG: Ray hit shock! C(UNTH)=%g Ne(thermal)=%g ratio=%.3e p=%g\n", my_C, Ne, (Ne > 0) ? my_C/Ne : -1.0, my_p);
     paramsM.distribution = paramsM.POWER_LAW; // 强制使用幂律拟合
     paramsM.power_law_p = my_p;               // 使用真实的 p
 
