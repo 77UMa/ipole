@@ -151,18 +151,21 @@ void jar_calc_dist(int dist, int pol, double X[NDIM], double Kcon[NDIM],
   // This was also used as shorthand in some models to cut off emission
   // Please use radiating_region instead for model applicability cutoffs,
   // or see integrate_emission for zeroing just jN
+// --- B. 先读取激波标志，再决定是否早期返回 ---
+  // 必须在 Ne 检查之前获取 is_shock：激波区域通常位于 sigma > sigma_cut 的
+  // 高磁化区域，get_model_ne() 会因 sigma_cut 返回 0，导致 DSA 发射被跳过。
+  int is_shock = get_model_kel(X);  // 从 HDF5 读取的激波开关 (1 或 0)
+  double my_C = get_model_unth(X);  // 从 HDF5 读取的归一化常数 C
+  double my_p = get_model_p(X);     // 从 HDF5 读取的谱指数 p
+
   double Ne = get_model_ne(X);
-  if (Ne <= 0.) {
+  if (Ne <= 0. && !is_shock) {
+    // 非激波区域：无热电子则无发射
     *jI = 0.0; *jQ = 0.0; *jU = 0.0; *jV = 0.0;
     *aI = 0.0; *aQ = 0.0; *aU = 0.0; *aV = 0.0;
     *rQ = 0; *rU = 0; *rV = 0;
     return;
   }
-// --- [新增开始] B. 获取您的激波加速物理量 ---
-  double my_C = get_model_unth(X);  // 从 HDF5 读取的归一化常数 C
-  double my_p = get_model_p(X);     // 从 HDF5 读取的谱指数 p
-  int is_shock = get_model_kel(X);  // 从 HDF5 读取的激波开关 (1 或 0)
-  // --- [新增结束] ---
 
   // Call through to the model if it's responsible for this job
   if (dist == E_CUSTOM) {
