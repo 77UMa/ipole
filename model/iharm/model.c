@@ -622,6 +622,9 @@ void init_physical_quantities(int n, double rescale_factor)
       for (int k = 0; k < N3+2; k++) {
         data[n]->ne[i][j][k] = data[n]->p[KRHO][i][j][k] * RHO_unit/(MP+ME) * Ne_factor;
 
+        // UNTH 单位换算：HDF5 存的是代码单位，转换为物理单位 [cm^-3]
+        data[n]->p[UNTH][i][j][k] *= RHO_unit / (MP+ME);
+
         data[n]->b[i][j][k] *= rescale_factor;
 
         // here b is in gauss; this takes it back to code units to 
