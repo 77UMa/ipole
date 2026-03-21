@@ -18,7 +18,7 @@
 #include <string.h>
 
 // model.c 顶部
-#define NVAR (12) // 从 10 修改为 12，预留足够空间
+#define NVAR (13) // 从 12 修改为 13，新增 GAMMA_MIN_IDX 槽位
 #define USE_FIXED_TPTE (0)
 #define USE_MIXED_TPTE (1)
 #define NSUP (3)
@@ -1943,6 +1943,11 @@ void load_iharm_data(int n, char *fnam, int dumpidx, int verbose)
     hdf5_read_array(data[n]->p[P_IDX][0][0], "p", 3, fdims3d, fstart3d, fcount3d, mdims3d, mstart3d, H5T_IEEE_F64LE);
   }
 
+  // 4. 读取最小洛伦兹因子 (GAMMA_MIN, Bug 2 修复)
+  if (hdf5_exists("GAMMA_MIN")) {
+    hdf5_read_array(data[n]->p[GAMMA_MIN_IDX][0][0], "GAMMA_MIN", 3, fdims3d, fstart3d, fcount3d, mdims3d, mstart3d, H5T_IEEE_F64LE);
+  }
+
   //Reversing B Field
   if(reverse_field) {
     double multiplier = -1.0;
@@ -2144,4 +2149,15 @@ double get_model_p(double X[NDIM]) {
   int nA, nB;
   double tfac = set_tinterp_ns(X, &nA, &nB);
   return interp_scalar_time(X, data[nA]->p[P_IDX], data[nB]->p[P_IDX], tfac);
+}
+
+// 获取最小洛伦兹因子 gamma_min (Bug 2 修复)
+// 若 HDF5 未写入 GAMMA_MIN（旧文件兼容），返回默认值 100
+double get_model_gamma_min(double X[NDIM]) {
+  if (X_in_domain(X) == 0) return 100.0;
+  int nA, nB;
+  double tfac = set_tinterp_ns(X, &nA, &nB);
+  double val = interp_scalar_time(X, data[nA]->p[GAMMA_MIN_IDX], data[nB]->p[GAMMA_MIN_IDX], tfac);
+  // 若格网值为零（默认初始化），回退到全局参数
+  return (val > 1.0) ? val : 100.0;
 }

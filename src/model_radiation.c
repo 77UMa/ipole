@@ -190,13 +190,14 @@ void jar_calc_dist(int dist, int pol, double X[NDIM], double Kcon[NDIM],
     if (hit_count++ % 1000 == 0) printf("DEBUG: Ray hit shock! C=%g, p=%g\n", my_C, my_p);
     paramsM.distribution = paramsM.POWER_LAW; // 强制使用幂律拟合
     paramsM.power_law_p = my_p;               // 使用真实的 p
-    
+
     // 【替换杨等模型的核心点】：不再使用 powerlaw_eta * B^2
     // 直接将电子密度设置为您计算的 C 归一化常数
-    paramsM.electron_density = (my_C > 0) ? my_C : 1e-20; 
-    
-    // 设置加速截止的能量上限
-    paramsM.gamma_min = powerlaw_gamma_min;
+    paramsM.electron_density = (my_C > 0) ? my_C : 1e-20;
+
+    // Bug 2 修复：使用逐格网格的物理 gamma_min（由 DSA p_min 计算），
+    // 而非全局硬编码常数 powerlaw_gamma_min=100
+    paramsM.gamma_min = get_model_gamma_min(X);
     paramsM.gamma_max = powerlaw_gamma_max;
     paramsM.gamma_cutoff = powerlaw_gamma_cut;
   } 

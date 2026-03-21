@@ -35,6 +35,9 @@ double get_model_p(double X[NDIM]);
 // 获取激波掩码开关 (对应 HDF5 中的 KEL)
 int get_model_kel(double X[NDIM]);
 
+// 获取最小洛伦兹因子 gamma_min (对应 HDF5 中的 GAMMA_MIN，Bug 2 修复)
+double get_model_gamma_min(double X[NDIM]);
+
 // For exotic or custom distributions
 void get_model_jar(double X[NDIM], double Kcon[NDIM],
     double *jI, double *jQ, double *jU, double *jV,
