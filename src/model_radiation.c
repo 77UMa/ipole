@@ -200,7 +200,7 @@ void jar_calc_dist(int dist, int pol, double X[NDIM], double Kcon[NDIM],
 
     // Bug 2 修复：使用逐格网格的物理 gamma_min（由 DSA p_min 计算），
     // 而非全局硬编码常数 powerlaw_gamma_min=100
-    paramsM.gamma_min = get_model_gamma_min(X);
+    paramsM.gamma_min = powerlaw_gamma_min;  // 暂时回退到硬编码100，隔离gamma_min修改的影响
     paramsM.gamma_max = powerlaw_gamma_max;
     paramsM.gamma_cutoff = powerlaw_gamma_cut;
   } 
