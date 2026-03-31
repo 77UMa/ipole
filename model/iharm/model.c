@@ -16,6 +16,7 @@
 
 #include <assert.h>
 #include <string.h>
+#include <omp.h>
 
 // model.c 顶部
 #define NVAR (13) // 从 12 修改为 13，新增 GAMMA_MIN_IDX 槽位
@@ -96,6 +97,12 @@ static int nloaded = 0;
 
 
 static hdf5_blob fluid_header = { 0 };
+
+static void print_model_timing(const char *stage, double stage_start, double total_start)
+{
+  double now = omp_get_wtime();
+  fprintf(stderr, "[timing][iharm] %s: %.3f s (cumulative %.3f s)\n", stage, now - stage_start, now - total_start);
+}
 
 
 // Debug KHARMA reader
@@ -294,6 +301,8 @@ void get_dumpfile_type(char *fnam, int dumpidx)
 
 void init_model(double *tA, double *tB)
 {
+  double total_start = omp_get_wtime();
+  double stage_start = total_start;
   // set up initial ordering of data[]
   data[0] = &dataA;
   data[1] = &dataB;
@@ -301,17 +310,24 @@ void init_model(double *tA, double *tB)
 
   fprintf(stderr, "Determining dump file type... ");
   get_dumpfile_type(fnam, dumpmin);
+  print_model_timing("get_dumpfile_type complete", stage_start, total_start);
+  stage_start = omp_get_wtime();
 
   // set up grid for fluid data
   fprintf(stderr, "Reading data header...\n");
   init_grid(fnam, dumpmin);
+  print_model_timing("init_grid complete", stage_start, total_start);
+  stage_start = omp_get_wtime();
 
   // set all dimensional quantities from loaded parameters
   set_units();
+  print_model_timing("set_units complete", stage_start, total_start);
+  stage_start = omp_get_wtime();
 
   // read fluid data
   fprintf(stderr, "Reading data...\n");
   load_data(0, fnam, dumpidx, 2);  
+  print_model_timing("load_data complete", stage_start, total_start);
   // replaced dumpmin -> 2 because apparently that argument was just .. removed
   dumpidx += dumpskip;
   #if SLOW_LIGHT
@@ -321,6 +337,8 @@ void init_model(double *tA, double *tB)
   #else // FAST LIGHT
   data[2]->t = 10000.;
   #endif // SLOW_LIGHT
+
+  print_model_timing("init_model complete", total_start, total_start);
 
   // horizon radius
   Rh = 1 + sqrt(1. - a * a);
@@ -1882,6 +1900,8 @@ void load_iharm_data(int n, char *fnam, int dumpidx, int verbose)
   // to the n'th copy of data (e.g., for slow light)
 
   double dMact, Ladv;
+  double total_start = omp_get_wtime();
+  double stage_start = total_start;
 
   char fname[256];
   snprintf(fname, 255, fnam, dumpidx);
@@ -1921,6 +1941,8 @@ void load_iharm_data(int n, char *fnam, int dumpidx, int verbose)
   hdf5_read_array(data[n]->p[B2][0][0], "prims", 4, fdims, fstart, fcount, mdims, mstart, H5T_IEEE_F64LE);
   fstart[3] = 7;
   hdf5_read_array(data[n]->p[B3][0][0], "prims", 4, fdims, fstart, fcount, mdims, mstart, H5T_IEEE_F64LE); 
+  print_model_timing("read prims complete", stage_start, total_start);
+  stage_start = omp_get_wtime();
 
 /* --- B. 定义 3D 数据读取所需的参数 (用于读取您新增的独立数据集) --- */
   // 注意这里只有 3 个元素，对应 N1, N2, N3
@@ -1934,21 +1956,29 @@ void load_iharm_data(int n, char *fnam, int dumpidx, int verbose)
   // 如果你在 Python 中存的是独立的 "KEL" 数据集
   if (hdf5_exists("KEL")) {
     hdf5_read_array(data[n]->p[KEL][0][0], "KEL", 3, fdims3d, fstart3d, fcount3d, mdims3d, mstart3d, H5T_IEEE_F64LE);
+    print_model_timing("read KEL complete", stage_start, total_start);
+    stage_start = omp_get_wtime();
   }
 
   // 2. 读取非热电子归一化 (UNTH)
   if (hdf5_exists("UNTH")) {
     hdf5_read_array(data[n]->p[UNTH][0][0], "UNTH", 3, fdims3d, fstart3d, fcount3d, mdims3d, mstart3d, H5T_IEEE_F64LE);
+    print_model_timing("read UNTH complete", stage_start, total_start);
+    stage_start = omp_get_wtime();
   }
 
   // 3. 读取非热电子谱指数 (p)
   if (hdf5_exists("p")) {
     hdf5_read_array(data[n]->p[P_IDX][0][0], "p", 3, fdims3d, fstart3d, fcount3d, mdims3d, mstart3d, H5T_IEEE_F64LE);
+    print_model_timing("read p complete", stage_start, total_start);
+    stage_start = omp_get_wtime();
   }
 
   // 4. 读取最小洛伦兹因子 (GAMMA_MIN, Bug 2 修复)
   if (hdf5_exists("GAMMA_MIN")) {
     hdf5_read_array(data[n]->p[GAMMA_MIN_IDX][0][0], "GAMMA_MIN", 3, fdims3d, fstart3d, fcount3d, mdims3d, mstart3d, H5T_IEEE_F64LE);
+    print_model_timing("read GAMMA_MIN complete", stage_start, total_start);
+    stage_start = omp_get_wtime();
   }
 
   //Reversing B Field
@@ -1972,6 +2002,8 @@ void load_iharm_data(int n, char *fnam, int dumpidx, int verbose)
   }
 
   hdf5_close();
+  print_model_timing("HDF5 close complete", stage_start, total_start);
+  stage_start = omp_get_wtime();
 
   dMact = Ladv = 0.;
 
@@ -2042,6 +2074,8 @@ void load_iharm_data(int n, char *fnam, int dumpidx, int verbose)
       }
     }
   }
+  print_model_timing("four-vector reconstruction complete", stage_start, total_start);
+  stage_start = omp_get_wtime();
 
   // check if 21st zone (i.e., 20th without ghost zones) is beyond r_eh
   // otherwise recompute
@@ -2112,6 +2146,8 @@ void load_iharm_data(int n, char *fnam, int dumpidx, int verbose)
 
   // now construct useful scalar quantities (over full (+ghost) zones of data)
   init_physical_quantities(n, rescale_factor);
+  print_model_timing("init_physical_quantities complete", stage_start, total_start);
+  print_model_timing("load_iharm_data complete", total_start, total_start);
 }
 
 
