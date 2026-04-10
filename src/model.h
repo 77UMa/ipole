@@ -26,7 +26,7 @@ double get_model_beta(double X[NDIM]);
 double get_model_ne(double X[NDIM]);
 
 /* --- [新增] 为激波加速物理模型提供的接口 --- */
-// 获取非热电子归一化常数 C (对应 HDF5 中的 UNTH)
+// 获取非热电子数密度 n_nth (对应 HDF5 中的 UNTH)
 double get_model_unth(double X[NDIM]); 
 
 // 获取非热电子谱指数 p (对应 HDF5 中的 p)
