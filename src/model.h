@@ -25,17 +25,17 @@ double get_model_sigma(double X[NDIM]);
 double get_model_beta(double X[NDIM]);
 double get_model_ne(double X[NDIM]);
 
-/* --- [新增] 为激波加速物理模型提供的接口 --- */
-// 获取非热电子数密度 n_nth (对应 HDF5 中的 UNTH)
-double get_model_unth(double X[NDIM]); 
+/* Shock-DSA interface fields loaded from HDF5. */
+/* Nonthermal electron number density n_nth, corresponding to dataset UNTH. */
+double get_model_unth(double X[NDIM]);
 
-// 获取非热电子谱指数 p (对应 HDF5 中的 p)
+/* Nonthermal power-law slope p_eff, corresponding to dataset p. */
 double get_model_p(double X[NDIM]);
 
-// 获取激波掩码开关 (对应 HDF5 中的 KEL)
+/* Shock mask flag, corresponding to dataset KEL. */
 int get_model_kel(double X[NDIM]);
 
-// 获取最小洛伦兹因子 gamma_min (对应 HDF5 中的 GAMMA_MIN，Bug 2 修复)
+/* Nonthermal low-energy cutoff gamma_min, corresponding to dataset GAMMA_MIN. */
 double get_model_gamma_min(double X[NDIM]);
 
 // For exotic or custom distributions

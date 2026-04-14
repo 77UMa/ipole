@@ -147,202 +147,188 @@ void jar_calc_dist(int dist, int pol, double X[NDIM], double Kcon[NDIM],
     double *aI, double *aQ, double *aU, double *aV,
     double *rQ, double *rU, double *rV)
 {
-  // Don't emit where there are no electrons
-  // This was also used as shorthand in some models to cut off emission
-  // Please use radiating_region instead for model applicability cutoffs,
-  // or see integrate_emission for zeroing just jN
-// --- B. 先读取激波标志，再决定是否早期返回 ---
-  // 必须在 Ne 检查之前获取 is_shock：激波区域通常位于 sigma > sigma_cut 的
-  // 高磁化区域，get_model_ne() 会因 sigma_cut 返回 0，导致 DSA 发射被跳过。
-  int is_shock = get_model_kel(X);  // 从 HDF5 读取的激波开关 (1 或 0)
-  double my_C = get_model_unth(X);  // 从 HDF5 读取的归一化常数 C
-  double my_p = get_model_p(X);     // 从 HDF5 读取的谱指数 p
-
+  int is_shock = get_model_kel(X);
+  double n_nth = get_model_unth(X);
+  double p_nth = get_model_p(X);
+  double gamma_min_nth = get_model_gamma_min(X);
   double Ne = get_model_ne(X);
+  int add_nonthermal = 0;
+  struct parameters paramsM;
+  double Ucon[NDIM], Ucov[NDIM], Bcon[NDIM], Bcov[NDIM];
+  double nu, nusq, theta;
+
   if (Ne <= 0. && !is_shock) {
-    // 非激波区域：无热电子则无发射
     *jI = 0.0; *jQ = 0.0; *jU = 0.0; *jV = 0.0;
     *aI = 0.0; *aQ = 0.0; *aU = 0.0; *aV = 0.0;
-    *rQ = 0; *rU = 0; *rV = 0;
+    *rQ = 0.0; *rU = 0.0; *rV = 0.0;
     return;
   }
 
-  // Call through to the model if it's responsible for this job
   if (dist == E_CUSTOM) {
     get_model_jar(X, Kcon, jI, jQ, jU, jV, aI, aQ, aU, aV, rQ, rU, rV);
     return;
   }
 
-  struct parameters paramsM;
   setConstParams(&paramsM);
-  // Set the parameters common to all distributions...
-  double Ucon[NDIM], Ucov[NDIM], Bcon[NDIM], Bcov[NDIM];
   get_model_fourv(X, Kcon, Ucon, Ucov, Bcon, Bcov);
-  double nu    = get_fluid_nu(Kcon, Ucov);
-  double nusq = nu*nu;
-  double theta = get_bk_angle(X, Kcon, Ucov, Bcon, Bcov);
-  paramsM.electron_density = Ne;
-  paramsM.nu               = nu;
-  paramsM.observer_angle   = theta;
-  paramsM.magnetic_field   = get_model_b(X);
+  nu = get_fluid_nu(Kcon, Ucov);
+  nusq = nu * nu;
+  theta = get_bk_angle(X, Kcon, Ucov, Bcon, Bcov);
 
-// --- C. 核心逻辑手术：注入激波加速模型 ---
-  // 如果 KEL 网格标记为 1，我们强行切换为幂律分布
+  paramsM.electron_density = Ne;
+  paramsM.nu = nu;
+  paramsM.observer_angle = theta;
+  paramsM.magnetic_field = get_model_b(X);
+
   if (is_shock == 1) {
     static int hit_count = 0;
-    if (hit_count++ % 100000 == 0) printf("DEBUG: Ray hit shock! n_nth(UNTH)=%g Ne(thermal)=%g ratio=%.3e p=%g\n", my_C, Ne, (Ne > 0) ? my_C/Ne : -1.0, my_p);
-    paramsM.distribution = paramsM.POWER_LAW; // 强制使用幂律拟合
-    paramsM.power_law_p = my_p;               // 使用真实的 p
-
-    // 【替换杨等模型的核心点】：不再使用 powerlaw_eta * B^2
-    // 直接将电子密度设置为您计算的 C 归一化常数
-    paramsM.electron_density = (my_C > 0) ? my_C : 1e-20;
-
-    // Bug 2 修复：使用逐格网格的物理 gamma_min（由 DSA p_min 计算）
-    double gamma_min_val = get_model_gamma_min(X);
-    paramsM.gamma_min = gamma_min_val;
-    if (hit_count % 100000 == 1) printf("DEBUG: gamma_min=%g gamma_max=%g\n", gamma_min_val, powerlaw_gamma_max);
-    paramsM.gamma_max = powerlaw_gamma_max;
-    paramsM.gamma_cutoff = powerlaw_gamma_cut;
-  } 
-  else {
-    // 非激波区域：保留原有逻辑 (默认为热分布)
-    paramsM.distribution = paramsM.MAXWELL_JUETTNER; //
+    if (hit_count++ % 100000 == 0) {
+      printf("DEBUG: Ray hit shock! n_nth(UNTH)=%g Ne(thermal)=%g ratio=%.3e p=%g\n",
+          n_nth, Ne, (Ne > 0.0) ? n_nth / Ne : -1.0, p_nth);
+      printf("DEBUG: gamma_min=%g gamma_max=%g\n", gamma_min_nth, powerlaw_gamma_max);
+    }
+    paramsM.distribution = paramsM.MAXWELL_JUETTNER;
     paramsM.electron_density = Ne;
     paramsM.theta_e = get_model_thetae(X);
-     // ...and then the specific distribution and its parameters.
-  switch (dist) {
-  case E_KAPPA: // Kappa fits (Pandya + Marszewski)
-    paramsM.distribution = paramsM.KAPPA_DIST;
-    // Fall back to Dexter starting at kappa > kappa_interp_start, completely at kappa_max
-    paramsM.dexter_fit = 1; // This only affects choice of thermal fallback
-    paramsM.kappa_interp_begin = fmin(variable_kappa_interp_start, variable_kappa_max);
-    paramsM.kappa_interp_end = variable_kappa_max;
-    paramsM.theta_e = get_model_thetae(X);
-    get_model_kappa(X, &(paramsM.kappa), &(paramsM.kappa_width));
-    break;
-  case E_POWERLAW: // Powerlaw fits (Pandya, no rotativities!)
-    paramsM.distribution = paramsM.POWER_LAW;
-    // NOTE WE REPLACE Ne!!
-    get_model_powerlaw_vals(X, &(paramsM.power_law_p), &(paramsM.electron_density),
-                            &(paramsM.gamma_min), &(paramsM.gamma_max), &(paramsM.gamma_cutoff));
-    break;
-  case E_THERMAL: // Pandya thermal fits
-    paramsM.distribution = paramsM.MAXWELL_JUETTNER;
-    paramsM.theta_e = get_model_thetae(X);
-    break;
-  case E_DEXTER_THERMAL: // Dexter thermal fits (default)
-  default:
-    paramsM.dexter_fit = 1;
-    paramsM.distribution = paramsM.MAXWELL_JUETTNER;
-    paramsM.theta_e = get_model_thetae(X);
-    break;
-  }
+    add_nonthermal = (n_nth > 0.0 && p_nth > 1.0 && gamma_min_nth >= 1.0);
+  } else {
+    switch (dist) {
+    case E_KAPPA:
+      paramsM.distribution = paramsM.KAPPA_DIST;
+      paramsM.dexter_fit = 1;
+      paramsM.kappa_interp_begin = fmin(variable_kappa_interp_start, variable_kappa_max);
+      paramsM.kappa_interp_end = variable_kappa_max;
+      paramsM.theta_e = get_model_thetae(X);
+      get_model_kappa(X, &(paramsM.kappa), &(paramsM.kappa_width));
+      break;
+    case E_POWERLAW:
+      paramsM.distribution = paramsM.POWER_LAW;
+      get_model_powerlaw_vals(X, &(paramsM.power_law_p), &(paramsM.electron_density),
+                              &(paramsM.gamma_min), &(paramsM.gamma_max), &(paramsM.gamma_cutoff));
+      break;
+    case E_THERMAL:
+      paramsM.distribution = paramsM.MAXWELL_JUETTNER;
+      paramsM.theta_e = get_model_thetae(X);
+      break;
+    case E_DEXTER_THERMAL:
+    default:
+      paramsM.dexter_fit = 1;
+      paramsM.distribution = paramsM.MAXWELL_JUETTNER;
+      paramsM.theta_e = get_model_thetae(X);
+      break;
+    }
   }
 
- 
+  *jI = 0.0; *jQ = 0.0; *jU = 0.0; *jV = 0.0;
+  *aI = 0.0; *aQ = 0.0; *aU = 0.0; *aV = 0.0;
+  *rQ = 0.0; *rU = 0.0; *rV = 0.0;
 
-  // First, enforce no emission/absorption along field lines,
-  // but allow Faraday rotation in polarized context
-  // TODO this skips any rho_V NaN/other checks
   if (theta <= 0.0 || theta >= M_PI) {
-    *jI = 0.0; *jQ = 0.0; *jU = 0.0; *jV = 0.0;
-    *aI = 0.0; *aQ = 0.0; *aU = 0.0; *aV = 0.0;
-    *rQ = 0.0; *rU = 0.0;
     if (pol && !(dist == E_UNPOL)) {
       *rV = rho_nu_fit(&paramsM, paramsM.STOKES_V) * nu;
-    } else {
-      *rV = 0.0;
     }
     return;
   }
 
-  // Then, if performing unpolarized transport, calculate only what we need
   if (!pol || dist == E_UNPOL) {
     if (paramsM.distribution == paramsM.MAXWELL_JUETTNER) {
-      paramsM.dexter_fit = 2; // Signal symphony fits to use Leung+
+      double Bnuinv;
+      paramsM.dexter_fit = 2;
       *jI = j_nu_fit(&paramsM, paramsM.STOKES_I);
-      if(do_bremss) *jI += bremss_I(&paramsM, bremss_type);
-      *jI /= nusq; // Avoids loss of precision in small numbers
-      double Bnuinv = Bnu_inv(nu, paramsM.theta_e); // Planck function
-      if (Bnuinv > 0) {
-        *aI = *jI / Bnuinv;
-      } else {
-        *aI = 0;
-      }
+      if (do_bremss) *jI += bremss_I(&paramsM, bremss_type);
+      *jI /= nusq;
+      Bnuinv = Bnu_inv(nu, paramsM.theta_e);
+      *aI = (Bnuinv > 0.0) ? (*jI / Bnuinv) : 0.0;
     } else {
-      paramsM.dexter_fit = 2; // Signal symphony fits to use Leung+ as fallback
+      paramsM.dexter_fit = 2;
       *jI = j_nu_fit(&paramsM, paramsM.STOKES_I) / nusq;
       *aI = alpha_nu_fit(&paramsM, paramsM.STOKES_I) * nu;
     }
-  } else { // Finally, calculate all coefficients normally
-    // EMISSIVITIES
-    *jI = j_nu_fit(&paramsM, paramsM.STOKES_I);
-    // Bremsstrahlung is computed only for thermal;
-    // silently drop Bremss+other dists, as absorptivities will be wrong
-    if(paramsM.distribution == paramsM.MAXWELL_JUETTNER && do_bremss)
-      *jI += bremss_I(&paramsM, bremss_type);
-    *jI /= nusq; // Avoids loss of precision in small numbers
 
+    if (add_nonthermal) {
+      struct parameters paramsPL = paramsM;
+      paramsPL.distribution = paramsPL.POWER_LAW;
+      paramsPL.electron_density = n_nth;
+      paramsPL.power_law_p = p_nth;
+      paramsPL.gamma_min = gamma_min_nth;
+      paramsPL.gamma_max = powerlaw_gamma_max;
+      paramsPL.gamma_cutoff = powerlaw_gamma_cut;
+      paramsPL.dexter_fit = 2;
+      *jI += j_nu_fit(&paramsPL, paramsPL.STOKES_I) / nusq;
+      *aI += alpha_nu_fit(&paramsPL, paramsPL.STOKES_I) * nu;
+    }
+  } else {
+    double jP, aP, pol_frac_e, pol_frac_a;
+
+    *jI = j_nu_fit(&paramsM, paramsM.STOKES_I);
+    if (paramsM.distribution == paramsM.MAXWELL_JUETTNER && do_bremss)
+      *jI += bremss_I(&paramsM, bremss_type);
+    *jI /= nusq;
     *jQ = -j_nu_fit(&paramsM, paramsM.STOKES_Q) / nusq;
     *jU = -j_nu_fit(&paramsM, paramsM.STOKES_U) / nusq;
     *jV = j_nu_fit(&paramsM, paramsM.STOKES_V) / nusq;
-    // Check basic relationships
-    double jP = sqrt(*jQ * *jQ + *jU * *jU + *jV * *jV);
-    if (*jI  < jP/max_pol_frac_e) {
-      // Transport does not like 100% polarization...
-      double pol_frac_e = *jI / jP * max_pol_frac_e;
+
+    if (paramsM.distribution == paramsM.MAXWELL_JUETTNER) {
+      double Bnuinv = Bnu_inv(nu, paramsM.theta_e);
+      if (Bnuinv > 0.0) {
+        *aI = *jI / Bnuinv;
+        *aQ = *jQ / Bnuinv;
+        *aU = *jU / Bnuinv;
+        *aV = *jV / Bnuinv;
+      }
+    } else {
+      *aI = alpha_nu_fit(&paramsM, paramsM.STOKES_I) * nu;
+      *aQ = -alpha_nu_fit(&paramsM, paramsM.STOKES_Q) * nu;
+      *aU = -alpha_nu_fit(&paramsM, paramsM.STOKES_U) * nu;
+      *aV = alpha_nu_fit(&paramsM, paramsM.STOKES_V) * nu;
+    }
+
+    if (paramsM.distribution == paramsM.POWER_LAW) {
+      *rQ = 0.0;
+      *rU = 0.0;
+      *rV = 0.0;
+    } else {
+      paramsM.dexter_fit = 0;
+      *rQ = rho_nu_fit(&paramsM, paramsM.STOKES_Q) * nu;
+      *rU = rho_nu_fit(&paramsM, paramsM.STOKES_U) * nu;
+      *rV = rho_nu_fit(&paramsM, paramsM.STOKES_V) * nu;
+    }
+
+    if (add_nonthermal) {
+      struct parameters paramsPL = paramsM;
+      paramsPL.distribution = paramsPL.POWER_LAW;
+      paramsPL.electron_density = n_nth;
+      paramsPL.power_law_p = p_nth;
+      paramsPL.gamma_min = gamma_min_nth;
+      paramsPL.gamma_max = powerlaw_gamma_max;
+      paramsPL.gamma_cutoff = powerlaw_gamma_cut;
+      paramsPL.dexter_fit = 2;
+
+      *jI += j_nu_fit(&paramsPL, paramsPL.STOKES_I) / nusq;
+      *jQ += -j_nu_fit(&paramsPL, paramsPL.STOKES_Q) / nusq;
+      *jU += -j_nu_fit(&paramsPL, paramsPL.STOKES_U) / nusq;
+      *jV += j_nu_fit(&paramsPL, paramsPL.STOKES_V) / nusq;
+      *aI += alpha_nu_fit(&paramsPL, paramsPL.STOKES_I) * nu;
+      *aQ += -alpha_nu_fit(&paramsPL, paramsPL.STOKES_Q) * nu;
+      *aU += -alpha_nu_fit(&paramsPL, paramsPL.STOKES_U) * nu;
+      *aV += alpha_nu_fit(&paramsPL, paramsPL.STOKES_V) * nu;
+    }
+
+    jP = sqrt(*jQ * *jQ + *jU * *jU + *jV * *jV);
+    if (jP > 0.0 && *jI < jP/max_pol_frac_e) {
+      pol_frac_e = *jI / jP * max_pol_frac_e;
       *jQ *= pol_frac_e;
       *jU *= pol_frac_e;
       *jV *= pol_frac_e;
     }
 
-    // ABSORPTIVITIES
-    if (paramsM.distribution == paramsM.MAXWELL_JUETTNER) { // Thermal distributions
-      // Get absorptivities via Kirchoff's law
-      // Already invariant, guaranteed to respect aI > aP
-      // Faster than calling Symphony code since we know jS, Bnu
-      double Bnuinv = Bnu_inv(nu, paramsM.theta_e); // Planck function
-      if (Bnuinv > 0) {
-        *aI = *jI / Bnuinv;
-        *aQ = *jQ / Bnuinv;
-        *aU = *jU / Bnuinv;
-        *aV = *jV / Bnuinv;
-      } else {
-        *aI = 0.;
-        *aQ = 0.;
-        *aU = 0.;
-        *aV = 0.;
-      }
-    } else {
-      *aI = alpha_nu_fit(&paramsM, paramsM.STOKES_I) * nu;
-      // Note Bremss emission is available for thermal dists *only*
-      *aQ = -alpha_nu_fit(&paramsM, paramsM.STOKES_Q) * nu;
-      *aU = -alpha_nu_fit(&paramsM, paramsM.STOKES_U) * nu;
-      *aV = alpha_nu_fit(&paramsM, paramsM.STOKES_V) * nu;
-    
-      // Check basic relationships
-      double aP = sqrt(*aQ * *aQ + *aU * *aU + *aV * *aV);
-      if (*aI < aP/max_pol_frac_a) {
-        // Transport does not like 100% polarization...
-        double pol_frac_a = *aI / aP * max_pol_frac_a;
-        *aQ *= pol_frac_a;
-        *aU *= pol_frac_a;
-        *aV *= pol_frac_a;
-      }
+    aP = sqrt(*aQ * *aQ + *aU * *aU + *aV * *aV);
+    if (aP > 0.0 && *aI < aP/max_pol_frac_a) {
+      pol_frac_a = *aI / aP * max_pol_frac_a;
+      *aQ *= pol_frac_a;
+      *aU *= pol_frac_a;
+      *aV *= pol_frac_a;
     }
-  if (paramsM.distribution == paramsM.POWER_LAW) {
-            *rQ = 0.0;
-            *rU = 0.0;
-            *rV = 0.0;
-    } else {
-            // 只有非幂律分布（热分布等）才调用这个会崩溃的函数
-            paramsM.dexter_fit = 0;
-            *rQ = rho_nu_fit(&paramsM, paramsM.STOKES_Q) * nu;
-            *rU = rho_nu_fit(&paramsM, paramsM.STOKES_U) * nu;
-            *rV = rho_nu_fit(&paramsM, paramsM.STOKES_V) * nu;
-    }
-
   }
 
 #if DEBUG
