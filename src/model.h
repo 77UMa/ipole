@@ -25,6 +25,19 @@ double get_model_sigma(double X[NDIM]);
 double get_model_beta(double X[NDIM]);
 double get_model_ne(double X[NDIM]);
 
+/* Shock-DSA interface fields loaded from HDF5. */
+/* Nonthermal electron number density n_nth, corresponding to dataset UNTH. */
+double get_model_unth(double X[NDIM]);
+
+/* Nonthermal power-law slope p_eff, corresponding to dataset p. */
+double get_model_p(double X[NDIM]);
+
+/* Shock mask flag, corresponding to dataset KEL. */
+int get_model_kel(double X[NDIM]);
+
+/* Nonthermal low-energy cutoff gamma_min, corresponding to dataset GAMMA_MIN. */
+double get_model_gamma_min(double X[NDIM]);
+
 // For exotic or custom distributions
 void get_model_jar(double X[NDIM], double Kcon[NDIM],
     double *jI, double *jQ, double *jU, double *jV,

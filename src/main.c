@@ -63,6 +63,12 @@ static double tf = 0.;
 
 Params params = { 0 };
 
+static void print_stage_timing(const char *stage, double stage_start, double total_start)
+{
+  double now = omp_get_wtime();
+  fprintf(stderr, "[timing] %s: %.3f s (cumulative %.3f s)\n", stage, now - stage_start, now - total_start);
+}
+
 int main(int argc, char *argv[]) 
 {
   // motd
@@ -71,6 +77,7 @@ int main(int argc, char *argv[])
 
   // initialization
   double time = omp_get_wtime();
+  double stage_time = time;
 
   double tA, tB; // for slow light
   double Xcam[NDIM];
@@ -87,13 +94,19 @@ int main(int argc, char *argv[])
   // load values from parameter file. handle all actual
   // model parameter comprehension in the model/* files
   load_par_from_argv(argc, argv, &params);
+  print_stage_timing("load_par_from_argv complete", stage_time, time);
+  stage_time = omp_get_wtime();
 
   // now that we've loaded all parameters, tell our model about
   // them and use init_model to load the first dump
   init_model(&tA, &tB);
+  print_stage_timing("init_model complete", stage_time, time);
+  stage_time = omp_get_wtime();
 
   // If we're using Bremsstrahlung emission, precalculate a spline
   init_bremss_spline();
+  print_stage_timing("init_bremss_spline complete", stage_time, time);
+  stage_time = omp_get_wtime();
 
   // Adaptive resolution option
   // nx, ny are the resolution at maximum refinement level
@@ -206,9 +219,11 @@ int main(int argc, char *argv[])
   }
 
   double initialization_time = omp_get_wtime() - time;
+  fprintf(stderr, "[timing] initialization complete: %.3f s\n", initialization_time);
 
   // slow light
   if (SLOW_LIGHT) {
+    double rt_stage_start = omp_get_wtime();
 
     // used to track when to write restart files
     double next_restart_after = -1.;
@@ -329,6 +344,8 @@ int main(int argc, char *argv[])
     }
 
     fprintf(stderr, "\n\nnow beginning radiative transfer calculation ...\n");
+    print_stage_timing("slow-light geodesic setup complete", rt_stage_start, time);
+    rt_stage_start = omp_get_wtime();
 
     // initialize state
     int nimg = 0, nopenimgs = 0;
@@ -484,6 +501,8 @@ int main(int argc, char *argv[])
           dump(image, imageS, taus, dfname, scale, Xcam, fovx, fovy, nx, ny, &params);
           valid_images[k] = 0;
           nopenimgs--;
+          print_stage_timing("slow-light first image output complete", rt_stage_start, time);
+          rt_stage_start = omp_get_wtime();
         }
 
       }
@@ -505,6 +524,7 @@ int main(int argc, char *argv[])
 
   // FAST LIGHT
   } else {
+    double fastlight_stage_start = omp_get_wtime();
     // BASE IMAGE at n_min
     // Allocate it, or use the existing allocation for just 1 level
     size_t initialspacingx = (nx - 1) / (nxmin - 1);
@@ -631,6 +651,8 @@ int main(int argc, char *argv[])
 #endif
       fprintf(stderr, "\n\n"); // TODO even for non-refined?
     }
+    print_stage_timing("fast-light base pass complete", fastlight_stage_start, time);
+    fastlight_stage_start = omp_get_wtime();
 
     for (int refined_level = 1; refined_level < refine_level; refined_level++) {
       size_t newspacingx = initialspacingx / pow(2, refined_level);
@@ -808,6 +830,7 @@ int main(int argc, char *argv[])
         make_ppm(image, freq, nx, ny, "ipole_lfnu.ppm");
       }
     }
+    print_stage_timing("fast-light output complete", fastlight_stage_start, time);
   } // SLOW_LIGHT
 
   if (params.histo) write_histo(&params);
