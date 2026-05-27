@@ -73,6 +73,8 @@ static double max_pol_frac_e = 0.99;
 static double max_pol_frac_a = 0.99;
 static int do_bremss = 0;
 static int bremss_type = 2;
+static unsigned long long shock_ray_hit_total = 0ULL;
+static unsigned long long shock_ray_hit_unth_nonzero = 0ULL;
 
 void try_set_radiation_parameter(const char *word, const char *value)
 {
@@ -93,6 +95,16 @@ void try_set_radiation_parameter(const char *word, const char *value)
 
   set_by_word_val(word, value, "max_pol_frac_e", &powerlaw_p, TYPE_DBL);
   set_by_word_val(word, value, "max_pol_frac_a", &powerlaw_p, TYPE_DBL);
+}
+
+void print_shock_unth_hit_stats(void)
+{
+  double ratio = (shock_ray_hit_total > 0ULL)
+      ? ((double) shock_ray_hit_unth_nonzero) / ((double) shock_ray_hit_total)
+      : 0.0;
+  fprintf(stderr,
+      "Ray-hit shock UNTH coverage: hits=%llu nonzero_unth=%llu ratio=%g\n",
+      shock_ray_hit_total, shock_ray_hit_unth_nonzero, ratio);
 }
 
 /**
@@ -181,6 +193,12 @@ void jar_calc_dist(int dist, int pol, double X[NDIM], double Kcon[NDIM],
   paramsM.magnetic_field = get_model_b(X);
 
   if (is_shock == 1) {
+#pragma omp atomic update
+    shock_ray_hit_total += 1ULL;
+    if (n_nth > 0.0) {
+#pragma omp atomic update
+      shock_ray_hit_unth_nonzero += 1ULL;
+    }
     static int hit_count = 0;
     if (hit_count++ % 100000 == 0) {
       printf("DEBUG: Ray hit shock! n_nth(UNTH)=%g Ne(thermal)=%g ratio=%.3e p=%g\n",

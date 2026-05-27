@@ -815,6 +815,7 @@ int main(int argc, char *argv[])
 
     // TODO print only for "real" pixels
     print_image_stats(image, imageS, nx, ny, params, scale);
+    print_shock_unth_hit_stats();
 
     // don't dump if we've been asked to quench output. useful for batch jobs
     // like when fitting light curve fluxes

@@ -12,6 +12,7 @@
 #include "par.h"
 
 void try_set_radiation_parameter(const char *word, const char *value);
+void print_shock_unth_hit_stats(void);
 
 /* transfer coefficients in tetrad frame */
 void jar_calc(double X[NDIM], double Kcon[NDIM],
